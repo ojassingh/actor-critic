@@ -2,6 +2,7 @@
 
 import { useAction, useQuery } from "convex/react";
 import { BookOpen, Loader, RotateCw, Upload } from "lucide-react";
+import { useState } from "react";
 import {
   FileUpload,
   FileUploadContent,
@@ -53,6 +54,9 @@ export function KnowledgeBaseDialog() {
     api.knowledgeBase.kbActions.retryProcessFile
   );
   const deleteFile = useAction(api.knowledgeBase.kbActions.deleteFile);
+  const [deletingIds, setDeletingIds] = useState<Set<Id<"knowledgeBaseFiles">>>(
+    () => new Set()
+  );
   const files = useQuery(api.knowledgeBase.kb.listFiles);
   const fileList = files ?? [];
   const isLoading = files === undefined;
@@ -93,7 +97,20 @@ export function KnowledgeBaseDialog() {
   };
 
   const handleDelete = (fileId: Id<"knowledgeBaseFiles">) => {
-    deleteFile({ fileId }).catch(handleError);
+    setDeletingIds((previous) => {
+      const next = new Set(previous);
+      next.add(fileId);
+      return next;
+    });
+    deleteFile({ fileId })
+      .catch(handleError)
+      .finally(() => {
+        setDeletingIds((previous) => {
+          const next = new Set(previous);
+          next.delete(fileId);
+          return next;
+        });
+      });
   };
 
   return (
@@ -145,6 +162,7 @@ export function KnowledgeBaseDialog() {
             {shouldShowList && (
               <div className="space-y-2">
                 {fileList.map((file) => {
+                  const isDeleting = deletingIds.has(file._id);
                   return (
                     <div
                       className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
@@ -175,6 +193,7 @@ export function KnowledgeBaseDialog() {
                         {file.status === "failed" && (
                           <Button
                             aria-label="Retry processing"
+                            disabled={isDeleting}
                             onClick={() => handleRetry(file._id)}
                             size="icon-xs"
                             type="button"
@@ -183,9 +202,14 @@ export function KnowledgeBaseDialog() {
                             <RotateCw />
                           </Button>
                         )}
-                        <ConfirmDeleteDialog
-                          onConfirm={() => handleDelete(file._id)}
-                        />
+                        {isDeleting ? (
+                          <Loader className="size-4 animate-spin text-muted-foreground" />
+                        ) : (
+                          <ConfirmDeleteDialog
+                            disabled={isDeleting}
+                            onConfirm={() => handleDelete(file._id)}
+                          />
+                        )}
                       </div>
                     </div>
                   );

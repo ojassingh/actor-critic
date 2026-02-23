@@ -1,16 +1,13 @@
 import { ConvexError } from "convex/values";
 import { toast } from "sonner";
 import { AppError, ERROR_MESSAGES, isAppErrorCode } from "@/lib/errors";
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+import { getString, isRecord } from "@/lib/utils";
 
 const getStringProp = (value: unknown, key: string): string | undefined => {
   if (!isRecord(value)) {
     return undefined;
   }
-  const prop = value[key];
-  return typeof prop === "string" ? prop : undefined;
+  return getString(value[key]);
 };
 
 const getConvexErrorMessage = (data: unknown): string | undefined => {

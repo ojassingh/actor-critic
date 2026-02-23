@@ -2,7 +2,7 @@
 
 import { createContext, use } from "react";
 import type { Id } from "@/convex/_generated/dataModel";
-import type { ChatMessage } from "@/lib/types/chat";
+import type { ChatMessage, SourceDocumentPart } from "@/lib/types/chat";
 
 export type SubmitPromptFn = (
   prompt: string,
@@ -14,6 +14,8 @@ export interface ChatThreadContextValue {
   readonly isLoading: boolean;
   readonly isStreaming: boolean;
   readonly messages: ChatMessage[];
+  readonly selectedSource: SourceDocumentPart | null;
+  readonly setSelectedSource: (part: SourceDocumentPart | null) => void;
   readonly shouldShowThread: boolean;
   readonly stop: () => void;
   readonly submitPrompt: SubmitPromptFn;

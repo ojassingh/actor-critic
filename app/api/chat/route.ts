@@ -16,7 +16,9 @@ import {
   extractAndVerify,
   getLastUserMessage,
   getMessageText,
-  toPersistedAssistantResponse,
+  streamAssistantResponse,
+  toSourceParts,
+  type VerificationResult,
 } from "./helpers";
 
 const model = "xai/grok-4.1-fast-reasoning";
@@ -35,17 +37,31 @@ const GENERAL_CHAT_SYSTEM_PROMPT =
 const GENERATE_CONTENT_SYSTEM_PROMPT =
   "Generate clear, concise marketing copy based on the user's request. Avoid unsupported factual claims.";
 const EXTRACT_CLAIMS_SYSTEM_PROMPT =
-  'Extract factual, checkable claims from the input text. Return JSON only: {"claims": string[]}.';
+  'Extract factual, checkable claims from the input text. Keep each claim self-contained with qualifiers (e.g., population, comparator, dosage, timeframe, units). Do not split a claim if splitting would drop context. Do not include opinions, questions, or instructions. Return JSON only: {"claims": string[]}.';
 const VERIFY_CLAIM_SYSTEM_PROMPT =
-  "Check whether the claim is supported by the provided context. Return JSON only with keys: isSupported, document_name, matching_text.";
+  "Use only the provided context. Each context block starts with source_id and Document. If the claim is supported, set isSupported=true, choose the best matching source_id from the context, set document_name to that Document value, and set matching_text to a short verbatim excerpt from the context (<= 25 words). If not supported, set isSupported=false and all other fields to null. Return JSON only with keys: isSupported, document_name, matching_text, source_id.";
 const REWRITE_DRAFT_SYSTEM_PROMPT =
   "Rewrite the draft to remove or correct unsupported claims while preserving intent and readability. Return plain text only.";
 const FACT_CHECK_SUMMARY_SYSTEM_PROMPT =
-  "Write a friendly, concise summary of fact-check results. Clearly separate supported and unsupported claims.";
+  "Write a friendly, concise summary of fact-check results. Clearly separate supported and unsupported claims. For supported claims, include the document name and source_id in brackets, and quote a short matching_text excerpt when available. For unsupported claims, say what evidence is missing.";
+
+const formatVerificationsForPrompt = (
+  verifications: VerificationResult[]
+): string =>
+  verifications
+    .map((verification, index) =>
+      [
+        `Claim ${index + 1}: ${verification.claim}`,
+        `Supported: ${verification.isSupported ? "yes" : "no"}`,
+        `Document: ${verification.document_name ?? "n/a"}`,
+        `Source ID: ${verification.source?.sourceId ?? "n/a"}`,
+        `Matching text: ${verification.matching_text ?? "n/a"}`,
+      ].join("\n")
+    )
+    .join("\n\n");
 
 interface ChatRequestBody {
   chatFileIds?: Id<"chatFiles">[];
-  messageId?: string;
   messages?: UIMessage[];
   threadId?: Id<"chatThreads">;
   trigger?: string;
@@ -53,11 +69,11 @@ interface ChatRequestBody {
 
 export async function POST(req: Request) {
   const body: ChatRequestBody = await req.json();
-  const rawMessages = body.messages ?? [];
+  const requestMessages = body.messages ?? [];
   const threadId = body.threadId;
   const chatFileIds = body.chatFileIds ?? [];
 
-  if (!threadId || rawMessages.length === 0) {
+  if (!threadId) {
     return Response.json({ error: "INVALID_REQUEST" }, { status: 400 });
   }
 
@@ -66,11 +82,8 @@ export async function POST(req: Request) {
     return Response.json({ error: "THREAD_NOT_FOUND" }, { status: 404 });
   }
 
-  const sanitizedMessages = rawMessages.filter(
-    (message) => Array.isArray(message.parts) && message.parts.length > 0
-  );
   const validated = await safeValidateUIMessages({
-    messages: sanitizedMessages,
+    messages: requestMessages,
   });
   if (!validated.success) {
     console.error("Chat request failed message validation.", validated.error);
@@ -79,7 +92,9 @@ export async function POST(req: Request) {
 
   const messages = validated.data;
   const lastMessage = messages.at(-1);
-  if (!lastMessage) {
+  const lastUserMessage = getLastUserMessage(messages);
+  const latestUserText = lastUserMessage ? getMessageText(lastUserMessage) : "";
+  if (!(lastMessage && latestUserText)) {
     return Response.json({ error: "INVALID_REQUEST" }, { status: 400 });
   }
 
@@ -89,12 +104,6 @@ export async function POST(req: Request) {
     lastMessage.parts.length > 0
   ) {
     await appendUserMessage(threadId, lastMessage, chatFileIds);
-  }
-
-  const lastUserMessage = getLastUserMessage(messages);
-  const latestUserText = lastUserMessage ? getMessageText(lastUserMessage) : "";
-  if (!latestUserText) {
-    return Response.json({ error: "INVALID_REQUEST" }, { status: 400 });
   }
 
   const {
@@ -109,19 +118,18 @@ export async function POST(req: Request) {
       }),
     }),
   });
-
-  const modelMessages = await convertToModelMessages(messages);
+  console.log("[chat] route", route);
 
   if (route === "general_chat") {
-    const result = streamText({
-      model,
-      system: GENERAL_CHAT_SYSTEM_PROMPT,
-      messages: modelMessages,
-      stopWhen: stepCountIs(MAX_TOOL_STEPS),
-      abortSignal: req.signal,
-    });
-    console.log("[chat] Returning general chat stream");
-    return toPersistedAssistantResponse(result, {
+    const modelMessages = await convertToModelMessages(messages);
+    return streamAssistantResponse({
+      result: streamText({
+        model,
+        system: GENERAL_CHAT_SYSTEM_PROMPT,
+        messages: modelMessages,
+        stopWhen: stepCountIs(MAX_TOOL_STEPS),
+        abortSignal: req.signal,
+      }),
       threadId,
       originalMessages: messages,
     });
@@ -137,6 +145,7 @@ export async function POST(req: Request) {
       messages: [{ role: "user", content: latestUserText }],
     });
     generatedDraft = text;
+    console.log("[chat] generated draft", generatedDraft);
     targetContent = text;
   }
 
@@ -146,6 +155,7 @@ export async function POST(req: Request) {
     extractClaimsSystemPrompt: EXTRACT_CLAIMS_SYSTEM_PROMPT,
     verifyClaimSystemPrompt: VERIFY_CLAIM_SYSTEM_PROMPT,
   });
+  console.log("[chat] verifications", verifications);
   const failedClaims = verifications.filter(
     (verification) => !verification.isSupported
   );
@@ -155,44 +165,47 @@ export async function POST(req: Request) {
     failedClaims.length > 0 &&
     generatedDraft
   ) {
-    const rewriteResult = streamText({
-      model,
-      system: REWRITE_DRAFT_SYSTEM_PROMPT,
-      prompt: [
-        "Original draft:",
-        generatedDraft,
-        "",
-        "Unsupported claims:",
-        JSON.stringify(failedClaims, null, 2),
-      ].join("\n"),
-      abortSignal: req.signal,
-    });
-    console.log("[chat] Returning auto-corrected stream");
-    return toPersistedAssistantResponse(rewriteResult, {
+    return streamAssistantResponse({
+      result: streamText({
+        model,
+        system: REWRITE_DRAFT_SYSTEM_PROMPT,
+        prompt: [
+          "Original draft:",
+          generatedDraft,
+          "",
+          "Unsupported claims:",
+          formatVerificationsForPrompt(failedClaims),
+        ].join("\n"),
+        abortSignal: req.signal,
+      }),
       threadId,
       originalMessages: messages,
     });
   }
 
+  const sourceParts = toSourceParts(verifications);
+  const summarySystemPrompt =
+    route === "generate_content"
+      ? `${FACT_CHECK_SUMMARY_SYSTEM_PROMPT} Include the approved draft at the end if available.`
+      : FACT_CHECK_SUMMARY_SYSTEM_PROMPT;
+  const summaryPrompt = [
+    "Fact-check results:",
+    formatVerificationsForPrompt(verifications),
+    ...(route === "generate_content"
+      ? ["", "Approved draft:", generatedDraft ?? ""]
+      : []),
+  ].join("\n");
   const summaryResult = streamText({
     model,
-    system:
-      route === "generate_content"
-        ? `${FACT_CHECK_SUMMARY_SYSTEM_PROMPT} Include the approved draft at the end if available.`
-        : FACT_CHECK_SUMMARY_SYSTEM_PROMPT,
-    prompt: [
-      "Fact-check results:",
-      JSON.stringify(verifications, null, 2),
-      ...(route === "generate_content"
-        ? ["", "Approved draft:", generatedDraft ?? ""]
-        : []),
-    ].join("\n"),
+    system: summarySystemPrompt,
+    prompt: summaryPrompt,
     abortSignal: req.signal,
   });
 
-  console.log("[chat] Returning fact-check summary stream");
-  return toPersistedAssistantResponse(summaryResult, {
+  return streamAssistantResponse({
+    result: summaryResult,
     threadId,
     originalMessages: messages,
+    sourceParts,
   });
 }

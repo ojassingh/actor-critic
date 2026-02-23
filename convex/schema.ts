@@ -59,10 +59,24 @@ export default defineSchema({
     userId: v.string(),
     fileId: v.id("knowledgeBaseFiles"),
     chunkIndex: v.number(),
+    chunkId: v.optional(v.string()),
+    segmentId: v.optional(v.string()),
+    pageNumber: v.optional(v.number()),
+    pageWidth: v.optional(v.number()),
+    pageHeight: v.optional(v.number()),
+    bbox: v.optional(
+      v.object({
+        left: v.number(),
+        top: v.number(),
+        width: v.number(),
+        height: v.number(),
+      })
+    ),
     content: v.string(),
     embed: v.string(),
     embedding: v.array(v.float64()),
   })
+    .index("by_userId", ["userId"])
     .index("by_fileId", ["fileId"])
     .vectorIndex("by_embedding", {
       vectorField: "embedding",

@@ -9,6 +9,7 @@ import type {
   SourceUrlPart,
   ToolPart,
 } from "@/lib/types/chat";
+import { isRecord } from "@/lib/utils";
 
 export interface ChatSuggestion {
   readonly prompt: string;
@@ -116,21 +117,22 @@ export const getFileUrl = (part: FilePart) => {
 
 export const genericSuggestions = [
   {
-    prompt: "Generic Claim",
+    prompt:
+      "Verify the claim: Flublok ensures identical antigenic match with WHO- and FDA-selected flu strains.",
   },
   {
-    prompt: "Generic Claim 2",
+    prompt:
+      "Verify the claim: Flublok contains 3x the hemagglutinin (HA) antigen content of standard-dose flu vaccines, which has been linked to greater immunogenicity vs standard-dose flu vaccines.",
   },
   {
-    prompt: "Generic Claim 3",
+    prompt:
+      "Verify the claim: Cell- and egg-based flu vaccines have the potential to develop mutations during production, which may reduce their effectiveness.",
   },
   {
-    prompt: "Generic Claim 4",
+    prompt:
+      "Verify the claim: Recombinant technology leads to a broader immune response that may provide cross-protection, even in a mismatch season.",
   },
 ] as const satisfies readonly ChatSuggestion[];
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
 
 export const getChatFileIds = (metadata: unknown): Id<"chatFiles">[] => {
   if (!isRecord(metadata)) {

@@ -7,11 +7,27 @@ import pRetry from "p-retry";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { type ActionCtx, action, internalAction } from "../_generated/server";
+import { searchMatchValidator } from "./kb";
+
+interface SearchMatch {
+  bbox?: { left: number; top: number; width: number; height: number };
+  chunkId?: string;
+  content: string;
+  fileId: Id<"knowledgeBaseFiles">;
+  filename: string;
+  pageHeight?: number;
+  pageNumber?: number;
+  pageWidth?: number;
+  segmentId?: string;
+}
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const CHUNKR_POLL_DELAY_MS = 2000;
 const CHUNKR_MAX_POLL_ATTEMPTS = 60;
 const CHUNKR_TARGET_TOKENS = 6000;
+const EMBEDDING_MODEL = "openai/text-embedding-3-small";
+const DEFAULT_SEARCH_LIMIT = 6;
+const MAX_SEARCH_LIMIT = 20;
 
 const isAllowedContentType = (contentType: string): boolean =>
   contentType === "application/pdf" || contentType.startsWith("image/");
@@ -28,6 +44,11 @@ const requireUserId = async (
   return identity.subject;
 };
 
+const toSearchLimit = (value: number | undefined): number => {
+  const normalized = Math.trunc(value ?? DEFAULT_SEARCH_LIMIT);
+  return Math.min(Math.max(normalized, 1), MAX_SEARCH_LIMIT);
+};
+
 export const registerUpload = action({
   args: {
     storageId: v.id("_storage"),
@@ -36,12 +57,7 @@ export const registerUpload = action({
   returns: v.object({
     fileId: v.id("knowledgeBaseFiles"),
   }),
-  handler: async (
-    ctx,
-    args
-  ): Promise<{
-    fileId: Id<"knowledgeBaseFiles">;
-  }> => {
+  handler: async (ctx, args): Promise<{ fileId: Id<"knowledgeBaseFiles"> }> => {
     const label = "[knowledgeBase/kbActions: registerUpload]";
     const userId = await requireUserId(ctx, label);
 
@@ -152,10 +168,29 @@ export const processFile = internalAction({
         });
       }
 
-      const chunks = (completed.output?.chunks ?? [])
-        .map((chunk) => chunk.content?.trim() ?? "")
-        .filter(Boolean);
-      if (chunks.length === 0) {
+      const segments = (completed.output?.chunks ?? [])
+        .flatMap((chunk, chunkIndex) =>
+          (chunk.segments ?? []).map((segment) => {
+            const content =
+              segment.content ?? segment.text ?? segment.embed ?? "";
+            const embedText =
+              segment.embed ?? segment.content ?? segment.text ?? "";
+            return {
+              chunkIndex,
+              chunkId: chunk.chunk_id ?? undefined,
+              segmentId: segment.segment_id ?? undefined,
+              pageNumber: segment.page_number,
+              pageWidth: segment.page_width,
+              pageHeight: segment.page_height,
+              bbox: segment.bbox,
+              content,
+              embedText,
+            };
+          })
+        )
+        .filter((segment) => segment.embedText.trim().length > 0);
+
+      if (segments.length === 0) {
         await ctx.runMutation(internal.knowledgeBase.kb.updateFileInternal, {
           fileId: file._id,
           status: "ready",
@@ -165,11 +200,11 @@ export const processFile = internalAction({
       }
 
       const { embeddings } = await embedMany({
-        model: "openai/text-embedding-3-small",
-        values: chunks,
+        model: EMBEDDING_MODEL,
+        values: segments.map((segment) => segment.embedText),
       });
 
-      const rows = chunks.map((content, index) => {
+      const rows = segments.map((segment, index) => {
         const embedding = embeddings[index];
         if (!embedding) {
           throw new ConvexError({
@@ -180,9 +215,15 @@ export const processFile = internalAction({
         return {
           userId: file.userId,
           fileId: file._id,
-          chunkIndex: index,
-          content,
-          embed: content,
+          chunkIndex: segment.chunkIndex,
+          chunkId: segment.chunkId,
+          segmentId: segment.segmentId,
+          pageNumber: segment.pageNumber,
+          pageWidth: segment.pageWidth,
+          pageHeight: segment.pageHeight,
+          bbox: segment.bbox,
+          content: segment.content,
+          embed: segment.embedText,
           embedding,
         };
       });
@@ -289,49 +330,35 @@ export const searchKnowledgeBase = action({
     query: v.string(),
     limit: v.optional(v.number()),
   },
-  returns: v.array(
-    v.object({
-      fileId: v.id("knowledgeBaseFiles"),
-      filename: v.string(),
-      content: v.string(),
-    })
-  ),
-  handler: async (
-    ctx,
-    args
-  ): Promise<
-    Array<{
-      fileId: Id<"knowledgeBaseFiles">;
-      filename: string;
-      content: string;
-    }>
-  > => {
+  returns: v.array(searchMatchValidator),
+  handler: async (ctx, args): Promise<SearchMatch[]> => {
     const label = "[knowledgeBase/kbActions: searchKnowledgeBase]";
     const userId = await requireUserId(ctx, label);
 
     const { embedding } = await embed({
-      model: "openai/text-embedding-3-small",
+      model: EMBEDDING_MODEL,
       value: args.query,
     });
 
-    const results = await ctx.vectorSearch(
+    const limit = toSearchLimit(args.limit);
+
+    const vectorResults = await ctx.vectorSearch(
       "knowledgeBaseChunks",
       "by_embedding",
       {
         vector: embedding,
-        limit: args.limit ?? 6,
+        limit,
         filter: (q) => q.eq("userId", userId),
       }
     );
-    if (results.length === 0) {
+
+    if (vectorResults.length === 0) {
       return [];
     }
-    return await ctx.runQuery(
-      internal.knowledgeBase.kb.searchKnowledgeBaseInternal,
-      {
-        userId,
-        chunkIds: results.map((result) => result._id),
-      }
-    );
+
+    return ctx.runQuery(internal.knowledgeBase.kb.hydrateChunkResults, {
+      chunkIds: vectorResults.map((r) => r._id),
+      userId,
+    });
   },
 });

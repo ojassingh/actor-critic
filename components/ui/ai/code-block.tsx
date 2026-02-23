@@ -58,6 +58,10 @@ function CodeBlockCode({
     if (!code) {
       return;
     }
+    if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+      setCopied(false);
+      return;
+    }
     if (!document.hasFocus()) {
       setCopied(false);
       return;

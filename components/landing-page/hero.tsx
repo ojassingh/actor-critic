@@ -1,14 +1,20 @@
-export function Hero() {
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { Markdown } from "@/components/ui/ai/markdown";
+
+const HERO_MARKDOWN_PATH = "content/hero.md";
+
+export async function Hero() {
+  const markdown = await readFile(
+    join(process.cwd(), HERO_MARKDOWN_PATH),
+    "utf8"
+  );
+
   return (
-    <div className="relative grid h-screen grid-rows-12 place-content-center">
-      <div className="row-start-4 mx-auto text-center">
-        <h1 className="mx-auto mt-4 max-w-2xl text-pretty text-5xl tracking-tight">
-          This is a random project
-        </h1>
-        <p className="mx-auto mt-6 max-w-xl text-pretty text-center text-lg text-muted-foreground">
-          A simple tool to understand the actor-critic architecture
-        </p>
-      </div>
-    </div>
+    <section className="mx-auto max-w-2xl px-6 py-16">
+      <Markdown className="prose prose-slate max-w-none prose-h1:font-medium prose-h2:font-medium prose-h3:font-medium prose-strong:font-medium prose-h1:tracking-tight prose-h2:tracking-tight prose-h3:tracking-tight">
+        {markdown}
+      </Markdown>
+    </section>
   );
 }

@@ -26,7 +26,8 @@ import type {
   SourceUrlPart,
   ToolPart,
 } from "@/lib/types/chat";
-import { cn } from "@/lib/utils";
+import { cn, getString, isRecord } from "@/lib/utils";
+import { useChatThread } from "./chat-context";
 import {
   _isToolPartActive,
   categorizeMessageParts,
@@ -97,7 +98,7 @@ export function ChatMessage({
     );
   } else if (hasVisibleText) {
     textContent = isUser ? (
-      <div className="prose prose-sm min-w-0 max-w-[75%] whitespace-normal rounded-xl bg-primary/60 px-3 py-1 text-sm text-white">
+      <div className="prose prose-sm min-w-0 max-w-[75%] whitespace-normal rounded-xl bg-primary px-3 py-1 text-sm text-white">
         {messageText}
       </div>
     ) : (
@@ -285,6 +286,26 @@ function SourceList({
 }: {
   sourceParts: Array<SourceUrlPart | SourceDocumentPart>;
 }) {
+  const { setSelectedSource } = useChatThread();
+
+  const getSourceMetadata = (part: SourceDocumentPart) => {
+    if (!isRecord(part.providerMetadata)) {
+      return null;
+    }
+    if (isRecord(part.providerMetadata.rag)) {
+      return part.providerMetadata.rag;
+    }
+    return part.providerMetadata;
+  };
+
+  const getSnippet = (part: SourceDocumentPart) => {
+    const metadata = getSourceMetadata(part);
+    if (!metadata) {
+      return undefined;
+    }
+    return getString(metadata.snippet);
+  };
+
   return (
     <div className="flex flex-wrap gap-2">
       {sourceParts.map((part, index) => {
@@ -300,17 +321,20 @@ function SourceList({
           );
         }
 
-        const href = `#source-${part.sourceId}`;
         const title = part.title ?? part.filename ?? "Document";
-        const description = part.mediaType ?? "Document";
+        const snippet = getSnippet(part);
         return (
-          <Source
-            href={href}
+          <button
+            className="inline-flex h-5 max-w-32 items-center gap-1 overflow-hidden rounded-full bg-muted px-1 text-muted-foreground text-xs no-underline transition-colors duration-150 hover:bg-muted-foreground/30 hover:text-primary"
             key={part.sourceId ?? `source-${index.toString()}`}
+            onClick={() => setSelectedSource(part)}
+            title={snippet ?? title}
+            type="button"
           >
-            <SourceTrigger label={title} />
-            <SourceContent description={description} title={title} />
-          </Source>
+            <span className="truncate text-center font-normal tabular-nums">
+              {title}
+            </span>
+          </button>
         );
       })}
     </div>

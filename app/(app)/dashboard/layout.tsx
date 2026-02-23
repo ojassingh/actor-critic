@@ -26,7 +26,7 @@ export default async function AppLayout({
   return (
     <ThemeProvider
       attribute="class"
-      defaultTheme="system"
+      defaultTheme="light"
       disableTransitionOnChange
       enableSystem
     >

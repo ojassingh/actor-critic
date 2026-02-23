@@ -2,6 +2,49 @@ import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { internalMutation, internalQuery, query } from "../_generated/server";
 
+const fileStatusValidator = v.union(
+  v.literal("processing"),
+  v.literal("ready"),
+  v.literal("failed")
+);
+
+const bboxValidator = v.object({
+  left: v.number(),
+  top: v.number(),
+  width: v.number(),
+  height: v.number(),
+});
+
+const storedFileValidator = v.object({
+  _id: v.id("knowledgeBaseFiles"),
+  _creationTime: v.number(),
+  userId: v.string(),
+  filename: v.string(),
+  contentType: v.string(),
+  size: v.number(),
+  storageId: v.id("_storage"),
+  status: fileStatusValidator,
+  errorMessage: v.optional(v.string()),
+  chunkCount: v.optional(v.number()),
+  taskId: v.optional(v.string()),
+  createdAt: v.number(),
+  updatedAt: v.number(),
+});
+
+export const searchMatchValidator = v.object({
+  fileId: v.id("knowledgeBaseFiles"),
+  filename: v.string(),
+  content: v.string(),
+  chunkId: v.optional(v.string()),
+  segmentId: v.optional(v.string()),
+  pageNumber: v.optional(v.number()),
+  pageWidth: v.optional(v.number()),
+  pageHeight: v.optional(v.number()),
+  bbox: v.optional(bboxValidator),
+});
+
+const isPresent = <T>(value: T | null): value is T => value !== null;
+
 export const listFiles = query({
   args: {},
   returns: v.array(
@@ -12,11 +55,7 @@ export const listFiles = query({
       contentType: v.string(),
       url: v.string(),
       size: v.number(),
-      status: v.union(
-        v.literal("processing"),
-        v.literal("ready"),
-        v.literal("failed")
-      ),
+      status: fileStatusValidator,
       errorMessage: v.optional(v.string()),
       chunkCount: v.optional(v.number()),
       createdAt: v.number(),
@@ -25,15 +64,18 @@ export const listFiles = query({
   ),
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
-    const userId = identity?.subject ?? null;
-    if (!userId) {
+    if (!identity) {
       return [];
     }
+
     const files = await ctx.db
       .query("knowledgeBaseFiles")
-      .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", userId))
+      .withIndex("by_userId_and_createdAt", (q) =>
+        q.eq("userId", identity.subject)
+      )
       .order("desc")
       .collect();
+
     const results = await Promise.all(
       files.map(async (file) => {
         const url = await ctx.storage.getUrl(file.storageId);
@@ -55,37 +97,15 @@ export const listFiles = query({
         };
       })
     );
-    return results.filter((file) => file !== null);
+
+    return results.filter(isPresent);
   },
 });
 
 export const getFileInternal = internalQuery({
   args: { fileId: v.id("knowledgeBaseFiles") },
-  returns: v.union(
-    v.object({
-      _id: v.id("knowledgeBaseFiles"),
-      _creationTime: v.number(),
-      userId: v.string(),
-      filename: v.string(),
-      contentType: v.string(),
-      size: v.number(),
-      storageId: v.id("_storage"),
-      status: v.union(
-        v.literal("processing"),
-        v.literal("ready"),
-        v.literal("failed")
-      ),
-      errorMessage: v.optional(v.string()),
-      chunkCount: v.optional(v.number()),
-      taskId: v.optional(v.string()),
-      createdAt: v.number(),
-      updatedAt: v.number(),
-    }),
-    v.null()
-  ),
-  handler: async (ctx, args) => {
-    return await ctx.db.get(args.fileId);
-  },
+  returns: v.union(storedFileValidator, v.null()),
+  handler: (ctx, args) => ctx.db.get(args.fileId),
 });
 
 export const insertFileInternal = internalMutation({
@@ -97,9 +117,9 @@ export const insertFileInternal = internalMutation({
     storageId: v.id("_storage"),
   },
   returns: v.id("knowledgeBaseFiles"),
-  handler: async (ctx, args) => {
+  handler: (ctx, args) => {
     const timestamp = Date.now();
-    return await ctx.db.insert("knowledgeBaseFiles", {
+    return ctx.db.insert("knowledgeBaseFiles", {
       ...args,
       status: "processing",
       createdAt: timestamp,
@@ -111,9 +131,7 @@ export const insertFileInternal = internalMutation({
 export const updateFileInternal = internalMutation({
   args: {
     fileId: v.id("knowledgeBaseFiles"),
-    status: v.optional(
-      v.union(v.literal("processing"), v.literal("ready"), v.literal("failed"))
-    ),
+    status: v.optional(fileStatusValidator),
     errorMessage: v.optional(v.string()),
     chunkCount: v.optional(v.number()),
     taskId: v.optional(v.string()),
@@ -151,6 +169,12 @@ export const insertChunksInternal = internalMutation({
         userId: v.string(),
         fileId: v.id("knowledgeBaseFiles"),
         chunkIndex: v.number(),
+        chunkId: v.optional(v.string()),
+        segmentId: v.optional(v.string()),
+        pageNumber: v.optional(v.number()),
+        pageWidth: v.optional(v.number()),
+        pageHeight: v.optional(v.number()),
+        bbox: v.optional(bboxValidator),
         content: v.string(),
         embed: v.string(),
         embedding: v.array(v.float64()),
@@ -166,49 +190,86 @@ export const insertChunksInternal = internalMutation({
   },
 });
 
-export const searchKnowledgeBaseInternal = internalQuery({
+export const hydrateChunkResults = internalQuery({
   args: {
-    userId: v.string(),
     chunkIds: v.array(v.id("knowledgeBaseChunks")),
+    userId: v.string(),
   },
-  returns: v.array(
+  returns: v.array(searchMatchValidator),
+  handler: async (ctx, args) => {
+    const chunks = await Promise.all(args.chunkIds.map((id) => ctx.db.get(id)));
+
+    const fileNameCache = new Map<Id<"knowledgeBaseFiles">, string | null>();
+
+    const resolveFilename = async (
+      fileId: Id<"knowledgeBaseFiles">
+    ): Promise<string | null> => {
+      const cached = fileNameCache.get(fileId);
+      if (cached !== undefined) {
+        return cached;
+      }
+      const file = await ctx.db.get(fileId);
+      const name = file && file.userId === args.userId ? file.filename : null;
+      fileNameCache.set(fileId, name);
+      return name;
+    };
+
+    const matches = await Promise.all(
+      chunks.map(async (chunk) => {
+        if (!chunk || chunk.userId !== args.userId) {
+          return null;
+        }
+        const filename = await resolveFilename(chunk.fileId);
+        if (!filename) {
+          return null;
+        }
+        return {
+          fileId: chunk.fileId,
+          filename,
+          content: chunk.content,
+          chunkId: chunk.chunkId,
+          segmentId: chunk.segmentId,
+          pageNumber: chunk.pageNumber,
+          pageWidth: chunk.pageWidth,
+          pageHeight: chunk.pageHeight,
+          bbox: chunk.bbox,
+        };
+      })
+    );
+
+    return matches.filter(isPresent);
+  },
+});
+
+export const getFileViewerInfo = query({
+  args: {
+    fileId: v.id("knowledgeBaseFiles"),
+  },
+  returns: v.union(
     v.object({
-      fileId: v.id("knowledgeBaseFiles"),
+      contentType: v.string(),
       filename: v.string(),
-      content: v.string(),
-    })
+      url: v.string(),
+    }),
+    v.null()
   ),
   handler: async (ctx, args) => {
-    const fileNames = new Map<Id<"knowledgeBaseFiles">, string>();
-    const matches: Array<{
-      fileId: Id<"knowledgeBaseFiles">;
-      filename: string;
-      content: string;
-    }> = [];
-
-    for (const chunkId of args.chunkIds) {
-      const chunk = await ctx.db.get(chunkId);
-      if (!chunk || chunk.userId !== args.userId) {
-        continue;
-      }
-      if (!fileNames.has(chunk.fileId)) {
-        const file = await ctx.db.get(chunk.fileId);
-        if (!file || file.userId !== args.userId) {
-          continue;
-        }
-        fileNames.set(chunk.fileId, file.filename);
-      }
-      const filename = fileNames.get(chunk.fileId);
-      if (!filename) {
-        continue;
-      }
-      matches.push({
-        fileId: chunk.fileId,
-        filename,
-        content: chunk.content,
-      });
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return null;
     }
-
-    return matches;
+    const file = await ctx.db.get(args.fileId);
+    if (!file || file.userId !== identity.subject) {
+      return null;
+    }
+    const url = await ctx.storage.getUrl(file.storageId);
+    if (!url) {
+      return null;
+    }
+    return {
+      contentType: file.contentType,
+      filename: file.filename,
+      url,
+    };
   },
 });

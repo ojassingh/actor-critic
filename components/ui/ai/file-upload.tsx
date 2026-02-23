@@ -212,17 +212,6 @@ function FileUploadContent({ className, ...props }: FileUploadContentProps) {
 
 export { FileUpload, FileUploadTrigger, FileUploadContent };
 
-async function countPdfPages(file: File): Promise<number> {
-  try {
-    const buffer = await file.arrayBuffer();
-    const text = new TextDecoder("latin1").decode(new Uint8Array(buffer));
-    const matches = text.match(/\/Type\s*\/Page\b/g);
-    return matches?.length ?? 0;
-  } catch {
-    return 0;
-  }
-}
-
 async function validateFile(
   file: File
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
@@ -234,12 +223,6 @@ async function validateFile(
   }
   if (file.size > maxFileBytes) {
     return { ok: false, reason: "File is larger than 5 MB." };
-  }
-  if (isPdf) {
-    const pageCount = await countPdfPages(file);
-    if (pageCount === 0) {
-      return { ok: false, reason: "Unable to read PDF pages." };
-    }
   }
   return { ok: true };
 }

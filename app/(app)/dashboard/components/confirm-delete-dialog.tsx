@@ -15,11 +15,13 @@ import {
 
 interface ConfirmDeleteDialogProps {
   description?: string;
+  disabled?: boolean;
   onConfirm: () => void;
   title?: string;
 }
 
 export function ConfirmDeleteDialog({
+  disabled = false,
   description = "Are you sure you want to delete this?",
   onConfirm,
   title = "Delete document?",
@@ -29,6 +31,7 @@ export function ConfirmDeleteDialog({
       <DialogTrigger asChild>
         <Button
           aria-label="Delete document"
+          disabled={disabled}
           size="icon-xs"
           type="button"
           variant="ghost"
@@ -49,7 +52,12 @@ export function ConfirmDeleteDialog({
             </Button>
           </DialogClose>
           <DialogClose asChild>
-            <Button onClick={onConfirm} type="button" variant="destructive">
+            <Button
+              disabled={disabled}
+              onClick={onConfirm}
+              type="button"
+              variant="destructive"
+            >
               <Trash2 />
               Delete
             </Button>

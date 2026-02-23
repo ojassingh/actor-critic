@@ -4,7 +4,8 @@ import { useChat } from "@ai-sdk/react";
 import { useMutation, useQuery } from "convex/react";
 import { Plus } from "lucide-react";
 import { motion } from "motion/react";
-import { useCallback, useMemo, useState } from "react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -14,7 +15,11 @@ import {
 import { api } from "@/convex/_generated/api";
 import type { Id } from "@/convex/_generated/dataModel";
 import { handleError } from "@/lib/handle-error";
-import type { ChatMessage, ChatThreadId } from "@/lib/types/chat";
+import type {
+  ChatMessage,
+  ChatThreadId,
+  SourceDocumentPart,
+} from "@/lib/types/chat";
 import { cn } from "@/lib/utils";
 import { ChatThreadContext, useChatThread } from "./chat-context";
 import {
@@ -138,6 +143,14 @@ export function ChatThread({
 
   const shouldShowThread =
     hasActiveThread || liveMessages.length > 0 || isStreaming;
+  const [selectedSource, setSelectedSource] =
+    useState<SourceDocumentPart | null>(null);
+  useEffect(() => {
+    if (chatSessionKey) {
+      setSelectedSource(null);
+    }
+  }, [chatSessionKey]);
+
   const contextValue = useMemo(
     () => ({
       messages: shownMessages,
@@ -147,6 +160,8 @@ export function ChatThread({
       shouldShowThread,
       submitPrompt,
       stop,
+      selectedSource,
+      setSelectedSource,
     }),
     [
       shownMessages,
@@ -156,7 +171,41 @@ export function ChatThread({
       shouldShowThread,
       submitPrompt,
       stop,
+      selectedSource,
     ]
+  );
+  const threadActions = (
+    <div className="flex items-center gap-2">
+      <ChatHistoryMenu
+        isDisabled={isHistoryDisabled}
+        onSelect={(selectedThreadId) => {
+          setLocalThreadId(selectedThreadId);
+          setLocalSessionKey(selectedThreadId);
+          onThreadSelect?.(selectedThreadId);
+        }}
+        threads={threads}
+      />
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            onClick={() => {
+              if (onNavigateToLanding) {
+                onNavigateToLanding();
+                return;
+              }
+              setLocalThreadId(null);
+              setLocalSessionKey(`new-${crypto.randomUUID()}`);
+            }}
+            size="sm"
+            type="button"
+            variant="ghost"
+          >
+            <Plus className="h-5 w-5" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">New chat</TooltipContent>
+      </Tooltip>
+    </div>
   );
 
   return (
@@ -167,45 +216,16 @@ export function ChatThread({
           className
         )}
       >
-        <div className="absolute top-2 right-2 z-20 flex items-center gap-2">
-          <ChatHistoryMenu
-            isDisabled={isHistoryDisabled}
-            onSelect={(selectedThreadId) => {
-              setLocalThreadId(selectedThreadId);
-              setLocalSessionKey(selectedThreadId);
-              onThreadSelect?.(selectedThreadId);
-            }}
-            threads={threads}
-          />
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                onClick={() => {
-                  if (onNavigateToLanding) {
-                    onNavigateToLanding();
-                    return;
-                  }
-                  setLocalThreadId(null);
-                  setLocalSessionKey(`new-${crypto.randomUUID()}`);
-                }}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                <Plus className="h-5 w-5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="bottom">New chat</TooltipContent>
-          </Tooltip>
-        </div>
         {emptyStateLayout === "composerCenteredCardsBelow" ? (
           <ComposerCenteredChatLayout
+            actions={threadActions}
             shouldAnimateComposer={threadId === undefined}
             suggestions={genericSuggestions}
             titleClassName={emptyStateTitleClassName}
           />
         ) : (
           <DefaultChatLayout
+            actions={threadActions}
             suggestions={genericSuggestions}
             titleClassName={emptyStateTitleClassName}
           />
@@ -216,20 +236,23 @@ export function ChatThread({
 }
 
 function DefaultChatLayout({
+  actions,
   suggestions,
   titleClassName,
 }: {
+  readonly actions: ReactNode;
   readonly suggestions: readonly ChatSuggestion[];
   readonly titleClassName?: string;
 }) {
   const { shouldShowThread } = useChatThread();
 
   if (shouldShowThread) {
-    return <ThreadView />;
+    return <ThreadView actions={actions} />;
   }
 
   return (
     <EmptyThreadView
+      actions={actions}
       suggestions={suggestions}
       titleClassName={titleClassName}
     />
@@ -237,53 +260,49 @@ function DefaultChatLayout({
 }
 
 function ComposerCenteredChatLayout({
+  actions,
   shouldAnimateComposer,
   suggestions,
   titleClassName,
 }: {
+  readonly actions: ReactNode;
   readonly shouldAnimateComposer: boolean;
   readonly suggestions: readonly ChatSuggestion[];
   readonly titleClassName?: string;
 }) {
   const { shouldShowThread, composerKey, submitPrompt } = useChatThread();
 
+  if (shouldShowThread) {
+    return (
+      <div className="relative flex min-h-0 flex-1 flex-col pb-4">
+        <ThreadView actions={actions} contentBottomPaddingClassName="pb-6" />
+      </div>
+    );
+  }
+
   const composerContainerClassName = cn(
     "mx-auto w-full px-4",
-    shouldShowThread
-      ? "max-w-3xl"
-      : "flex max-w-2xl flex-1 flex-col justify-center"
+    "flex max-w-2xl flex-1 flex-col justify-center"
   );
-
-  const composerPlaceholder = shouldShowThread
-    ? chatComposerPlaceholders.followUp
-    : chatComposerPlaceholders.question;
 
   const composerArea = (
     <>
-      {!shouldShowThread && (
-        <ChatLandingHeader className="mb-4" titleClassName={titleClassName} />
-      )}
-      <PromptComposer key={composerKey} placeholder={composerPlaceholder} />
-      {!shouldShowThread && (
-        <ChatSuggestionGrid
-          className="mt-6"
-          onSubmitPrompt={submitPrompt}
-          suggestions={suggestions}
-        />
-      )}
+      <ChatLandingHeader className="mb-4" titleClassName={titleClassName} />
+      <PromptComposer
+        key={composerKey}
+        placeholder={chatComposerPlaceholders.question}
+      />
+      <ChatSuggestionGrid
+        className="mt-6"
+        onSubmitPrompt={submitPrompt}
+        suggestions={suggestions}
+      />
     </>
   );
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col pb-4">
-      {shouldShowThread ? (
-        <div className="min-h-0 flex-1">
-          <ThreadView
-            contentBottomPaddingClassName="pb-6"
-            showComposer={false}
-          />
-        </div>
-      ) : null}
+      <div className="absolute top-4 right-4 z-20">{actions}</div>
 
       {shouldAnimateComposer ? (
         <motion.div

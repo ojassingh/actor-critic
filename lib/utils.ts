@@ -1,10 +1,20 @@
 import { type ClassValue, clsx } from "clsx";
 import { formatDistanceStrict } from "date-fns";
+import isPlainObject from "lodash/isPlainObject";
 import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  isPlainObject(value);
+
+export const getString = (value: unknown): string | undefined =>
+  typeof value === "string" ? value : undefined;
+
+export const getNumber = (value: unknown): number | undefined =>
+  typeof value === "number" ? value : undefined;
 
 export function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {

@@ -18,6 +18,11 @@ import {
   FileUploadTrigger,
 } from "@/components/ui/ai/file-upload";
 import { Button } from "@/components/ui/button";
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from "@/components/ui/resizable";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
@@ -32,6 +37,7 @@ import { useChatThread } from "./chat-context";
 import { type ChatSuggestion, chatComposerPlaceholders } from "./chat-helpers";
 import { ChatMessage } from "./chat-message";
 import { ChatSuggestionCard } from "./chat-suggestion-card";
+import { PdfViewerPanel } from "./pdf-viewer-panel";
 
 const STREAMING_ASSISTANT_MESSAGE_ID = "__streaming_assistant__" as const;
 const STREAMING_ASSISTANT_PLACEHOLDER: ChatMessageType = {
@@ -239,6 +245,7 @@ export function PromptComposer({ placeholder }: { placeholder: string }) {
 }
 
 interface ThreadViewProps {
+  actions: React.ReactNode;
   composerPlaceholder?: string;
   contentBottomPaddingClassName?: string;
   showComposer?: boolean;
@@ -248,11 +255,19 @@ const getMessageKey = (message: ChatMessageType, index: number) =>
   message.id?.trim() || `${message.role}-${index}`;
 
 export function ThreadView({
+  actions,
   showComposer = true,
   contentBottomPaddingClassName,
   composerPlaceholder = chatComposerPlaceholders.followUp,
 }: ThreadViewProps) {
-  const { messages, isLoading, isStreaming, composerKey } = useChatThread();
+  const {
+    messages,
+    isLoading,
+    isStreaming,
+    composerKey,
+    selectedSource,
+    setSelectedSource,
+  } = useChatThread();
 
   const shouldShowAssistantPlaceholder =
     isStreaming && messages.at(-1)?.role === "user";
@@ -267,8 +282,9 @@ export function ThreadView({
   const contentBottomPadding =
     contentBottomPaddingClassName ?? (showComposer ? "pb-40" : "pb-6");
 
-  return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
+  const threadContent = (
+    <div className="relative flex h-full min-h-0 min-w-0 flex-col">
+      <div className="absolute top-4 right-4 z-20">{actions}</div>
       <StickToBottom
         className="relative min-h-0 min-w-0 flex-1"
         initial="smooth"
@@ -276,7 +292,7 @@ export function ThreadView({
       >
         <StickToBottom.Content
           className={cn(
-            "mx-auto w-full min-w-0 max-w-3xl space-y-4 pt-10",
+            "mx-auto w-full min-w-0 max-w-3xl space-y-4 px-4 pt-10",
             contentBottomPadding
           )}
         >
@@ -300,19 +316,40 @@ export function ThreadView({
         <ScrollToBottomButton />
       </StickToBottom>
       {showComposer ? (
-        <div className="sticky bottom-4 z-10 mx-auto w-full min-w-0 max-w-3xl shadow-md dark:bg-transparent">
+        <div className="sticky bottom-4 z-10 mx-auto w-full min-w-0 max-w-3xl bg-transparent px-4">
           <PromptComposer key={composerKey} placeholder={composerPlaceholder} />
         </div>
       ) : null}
     </div>
   );
+
+  if (!selectedSource) {
+    return threadContent;
+  }
+
+  return (
+    <ResizablePanelGroup>
+      <ResizablePanel defaultSize={50} minSize={35}>
+        {threadContent}
+      </ResizablePanel>
+      <ResizableHandle withHandle />
+      <ResizablePanel defaultSize={50} minSize={35}>
+        <PdfViewerPanel
+          onClose={() => setSelectedSource(null)}
+          source={selectedSource}
+        />
+      </ResizablePanel>
+    </ResizablePanelGroup>
+  );
 }
 
 export function EmptyThreadView({
+  actions,
   suggestions,
   composerPlaceholder = chatComposerPlaceholders.question,
   titleClassName,
 }: {
+  actions: React.ReactNode;
   suggestions: readonly ChatSuggestion[];
   composerPlaceholder?: string;
   titleClassName?: string;
@@ -320,9 +357,10 @@ export function EmptyThreadView({
   const { composerKey, submitPrompt } = useChatThread();
 
   return (
-    <div className="flex h-full min-w-0 flex-col">
+    <div className="relative flex h-full min-w-0 flex-col">
+      <div className="absolute top-4 right-4 z-20">{actions}</div>
       <div className="flex flex-1 items-center justify-center">
-        <div className="grid w-full max-w-2xl gap-4">
+        <div className="grid w-full max-w-2xl gap-4 px-4">
           <ChatLandingHeader titleClassName={titleClassName} />
           <ChatSuggestionGrid
             className="mt-4"
@@ -331,7 +369,7 @@ export function EmptyThreadView({
           />
         </div>
       </div>
-      <div className="mx-auto mt-4 w-full min-w-0 max-w-2xl pb-4">
+      <div className="mx-auto mt-4 w-full min-w-0 max-w-2xl px-4 pb-4">
         <PromptComposer key={composerKey} placeholder={composerPlaceholder} />
       </div>
     </div>
