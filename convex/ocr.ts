@@ -14,8 +14,7 @@ function getMistralClient(): Mistral {
 
 async function extractDataFromPdf(
   mistral: Mistral,
-  base64Pdf: string,
-  maxPages?: number
+  base64Pdf: string
 ): Promise<string> {
   const response = await mistral.ocr.process({
     model: "mistral-ocr-latest",
@@ -43,11 +42,6 @@ async function extractDataFromPdf(
     },
     includeImageBase64: false,
   });
-  if (maxPages && response.pages.length > maxPages) {
-    console.warn("[ocr: extractTextFromPdf] PDF page limit exceeded");
-    throw new ConvexError({ code: "OCR_PAGE_LIMIT_EXCEEDED" });
-  }
-
   return response.pages.map(getPageMarkdownWithAnnotations).join("\n\n");
 }
 
@@ -63,9 +57,8 @@ function getPageMarkdownWithAnnotations(page: OCRPageObject): string {
 }
 
 export const extractTextFromPdfBase64 = async (
-  base64Pdf: string,
-  maxPages?: number
+  base64Pdf: string
 ): Promise<string> => {
   const mistral = getMistralClient();
-  return await extractDataFromPdf(mistral, base64Pdf, maxPages);
+  return await extractDataFromPdf(mistral, base64Pdf);
 };

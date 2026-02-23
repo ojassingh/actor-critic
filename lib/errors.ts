@@ -7,8 +7,6 @@ export const ERROR_MESSAGES = {
   UNSUPPORTED_CONTENT_TYPE: "Unsupported file type. Upload a PDF or image",
   THREAD_NOT_FOUND: "Chat thread not found",
   OCR_CONFIG_ERROR: "OCR configuration error",
-  OCR_PAGE_LIMIT_EXCEEDED: "PDF has too many pages",
-  OCR_PARSE_ERROR: "Failed to process document",
   OCR_INVALID_RESPONSE: "Invalid response from AI service",
   INVALID_REQUEST: "Invalid request",
   INVALID_MESSAGES: "Invalid chat message payload",
@@ -36,7 +34,6 @@ export class AppError extends Error {
 
   static Ocr = {
     ConfigError: () => new AppError("OCR_CONFIG_ERROR"),
-    ParseError: () => new AppError("OCR_PARSE_ERROR"),
     InvalidResponse: () => new AppError("OCR_INVALID_RESPONSE"),
   };
 
