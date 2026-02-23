@@ -227,7 +227,6 @@ async function validateFile(
   file: File
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
   const maxFileBytes = 5 * 1024 * 1024;
-  const maxPdfPages = 5;
   const isPdf = file.type === "application/pdf";
   const isImage = file.type.startsWith("image/");
   if (!(isPdf || isImage)) {
@@ -240,9 +239,6 @@ async function validateFile(
     const pageCount = await countPdfPages(file);
     if (pageCount === 0) {
       return { ok: false, reason: "Unable to read PDF pages." };
-    }
-    if (pageCount > maxPdfPages) {
-      return { ok: false, reason: "PDF has more than 5 pages." };
     }
   }
   return { ok: true };

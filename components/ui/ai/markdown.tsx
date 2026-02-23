@@ -68,10 +68,7 @@ const MemoizedMarkdownBlock = memo(
     components?: Partial<Components>;
   }) {
     return (
-      <ReactMarkdown
-        components={components}
-        remarkPlugins={[remarkGfm]}
-      >
+      <ReactMarkdown components={components} remarkPlugins={[remarkGfm]}>
         {content}
       </ReactMarkdown>
     );

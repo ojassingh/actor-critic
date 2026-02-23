@@ -92,7 +92,7 @@ export function PromptComposer({ placeholder }: { placeholder: string }) {
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const generateUploadUrl = useAction(api.chat.files.generateUploadUrl);
+  const generateUploadUrl = useAction(api.storage.generateUploadUrl);
   const registerUpload = useAction(api.chat.filesActions.registerUpload);
 
   const { addFiles } = useChatAttachments({
