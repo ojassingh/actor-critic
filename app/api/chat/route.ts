@@ -68,6 +68,7 @@ interface ChatRequestBody {
 }
 
 export async function POST(req: Request) {
+  // Parse + validate request
   const body: ChatRequestBody = await req.json();
   const requestMessages = body.messages ?? [];
   const threadId = body.threadId;
@@ -98,6 +99,7 @@ export async function POST(req: Request) {
     return Response.json({ error: "INVALID_REQUEST" }, { status: 400 });
   }
 
+  // Persist user message
   if (
     lastMessage.role === "user" &&
     body.trigger !== "regenerate-message" &&
@@ -106,6 +108,7 @@ export async function POST(req: Request) {
     await appendUserMessage(threadId, lastMessage, chatFileIds);
   }
 
+  // Route classification
   const {
     output: { route },
   } = await generateText({
@@ -120,6 +123,7 @@ export async function POST(req: Request) {
   });
   console.log("[chat] route", route);
 
+  // General chat path
   if (route === "general_chat") {
     const modelMessages = await convertToModelMessages(messages);
     return streamAssistantResponse({
@@ -135,6 +139,7 @@ export async function POST(req: Request) {
     });
   }
 
+  // Generation path (draft first)
   let targetContent = latestUserText;
   let generatedDraft: string | null = null;
 
@@ -149,6 +154,7 @@ export async function POST(req: Request) {
     targetContent = text;
   }
 
+  // Claim extraction + verification
   const verifications = await extractAndVerify({
     content: targetContent,
     model,
@@ -160,6 +166,7 @@ export async function POST(req: Request) {
     (verification) => !verification.isSupported
   );
 
+  // Rewrite if unsupported claims
   if (
     route === "generate_content" &&
     failedClaims.length > 0 &&
@@ -183,6 +190,7 @@ export async function POST(req: Request) {
     });
   }
 
+  // Fact-check summary + sources
   const sourceParts = toSourceParts(verifications);
   const summarySystemPrompt =
     route === "generate_content"
