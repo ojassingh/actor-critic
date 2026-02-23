@@ -14,7 +14,10 @@ import type * as chat_filesActions from "../chat/filesActions.js";
 import type * as chat_messages from "../chat/messages.js";
 import type * as chat_threads from "../chat/threads.js";
 import type * as http from "../http.js";
+import type * as knowledgeBase_kb from "../knowledgeBase/kb.js";
+import type * as knowledgeBase_kbActions from "../knowledgeBase/kbActions.js";
 import type * as ocr from "../ocr.js";
+import type * as storage from "../storage.js";
 
 import type {
   ApiFromModules,
@@ -29,7 +32,10 @@ declare const fullApi: ApiFromModules<{
   "chat/messages": typeof chat_messages;
   "chat/threads": typeof chat_threads;
   http: typeof http;
+  "knowledgeBase/kb": typeof knowledgeBase_kb;
+  "knowledgeBase/kbActions": typeof knowledgeBase_kbActions;
   ocr: typeof ocr;
+  storage: typeof storage;
 }>;
 
 /**
