@@ -1,6 +1,6 @@
 import { generateText } from "ai";
 import { ConvexError, v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import {
   internalAction,
   internalMutation,
@@ -94,11 +94,16 @@ export const updateThreadTitleInternal = internalMutation({
   args: {
     threadId: v.id("chatThreads"),
     title: v.string(),
+    userId: v.string(),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
     const thread = await ctx.db.get(args.threadId);
-    if (!thread || thread.title !== DEFAULT_THREAD_TITLE) {
+    if (
+      !thread ||
+      thread.userId !== args.userId ||
+      thread.title !== DEFAULT_THREAD_TITLE
+    ) {
       return null;
     }
     await ctx.db.patch(args.threadId, {
@@ -117,21 +122,11 @@ export const generateThreadTitle = internalAction({
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const thread = await ctx.runQuery(api.chat.threads.getThread, {
-      threadId: args.threadId,
-    });
-    if (!thread || thread.userId !== args.userId) {
-      return null;
-    }
-    if (thread.title !== DEFAULT_THREAD_TITLE) {
-      return null;
-    }
-
     const { text } = await generateText({
       model: "xai/grok-4.1-fast-non-reasoning",
       system:
         "Write a 3-5 word Title Case chat title from the user's first message. No quotes.",
-      prompt: args.message,
+      prompt: `The user's message is: ${args.message}`,
     });
 
     const words = text
@@ -143,6 +138,7 @@ export const generateThreadTitle = internalAction({
     await ctx.runMutation(internal.chat.threads.updateThreadTitleInternal, {
       threadId: args.threadId,
       title: words || DEFAULT_THREAD_TITLE,
+      userId: args.userId,
     });
 
     return null;

@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, Sparkle } from "lucide-react";
+import { Sparkle, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type * as React from "react";
@@ -44,8 +44,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   isActive={pathname.startsWith("/dashboard")}
                 >
                   <Link href="/dashboard/chat">
-                    <Plus />
-                    <span>New Chat</span>
+                    <Sparkles />
+                    <span>Chat</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>
