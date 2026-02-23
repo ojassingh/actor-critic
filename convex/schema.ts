@@ -36,4 +36,37 @@ export default defineSchema({
   })
     .index("by_userId", ["userId"])
     .index("by_expiresAt", ["expiresAt"]),
+  knowledgeBaseFiles: defineTable({
+    userId: v.string(),
+    filename: v.string(),
+    contentType: v.string(),
+    size: v.number(),
+    storageId: v.id("_storage"),
+    status: v.union(
+      v.literal("processing"),
+      v.literal("ready"),
+      v.literal("failed")
+    ),
+    errorMessage: v.optional(v.string()),
+    chunkCount: v.optional(v.number()),
+    taskId: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_createdAt", ["userId", "createdAt"]),
+  knowledgeBaseChunks: defineTable({
+    userId: v.string(),
+    fileId: v.id("knowledgeBaseFiles"),
+    chunkIndex: v.number(),
+    content: v.string(),
+    embed: v.string(),
+    embedding: v.array(v.float64()),
+  })
+    .index("by_fileId", ["fileId"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 1536,
+      filterFields: ["userId"],
+    }),
 });
