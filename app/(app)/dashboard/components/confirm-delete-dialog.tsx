@@ -1,7 +1,6 @@
 "use client";
 
 import { Trash2, X } from "lucide-react";
-import type * as React from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -14,11 +13,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 
-type ConfirmDeleteDialogProps = {
+interface ConfirmDeleteDialogProps {
   description?: string;
   onConfirm: () => void;
   title?: string;
-};
+}
 
 export function ConfirmDeleteDialog({
   description = "Are you sure you want to delete this?",

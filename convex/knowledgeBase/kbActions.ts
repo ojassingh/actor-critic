@@ -1,12 +1,12 @@
 "use node";
 
-import { embedMany } from "ai";
+import { embed, embedMany } from "ai";
 import Chunkr from "chunkr-ai";
 import { ConvexError, v } from "convex/values";
 import pRetry from "p-retry";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import { action, internalAction } from "../_generated/server";
+import { type ActionCtx, action, internalAction } from "../_generated/server";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 const CHUNKR_POLL_DELAY_MS = 2000;
@@ -15,6 +15,18 @@ const CHUNKR_TARGET_TOKENS = 6000;
 
 const isAllowedContentType = (contentType: string): boolean =>
   contentType === "application/pdf" || contentType.startsWith("image/");
+
+const requireUserId = async (
+  ctx: ActionCtx,
+  label: string
+): Promise<string> => {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) {
+    console.error(`${label} unauthorized`);
+    throw new ConvexError({ code: "AUTH_UNAUTHORIZED" });
+  }
+  return identity.subject;
+};
 
 export const registerUpload = action({
   args: {
@@ -31,11 +43,7 @@ export const registerUpload = action({
     fileId: Id<"knowledgeBaseFiles">;
   }> => {
     const label = "[knowledgeBase/kbActions: registerUpload]";
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      console.error(`${label} unauthorized`);
-      throw new ConvexError({ code: "AUTH_UNAUTHORIZED" });
-    }
+    const userId = await requireUserId(ctx, label);
 
     const metadata = await ctx.runQuery(internal.storage.getStorageMetadata, {
       storageId: args.storageId,
@@ -59,7 +67,7 @@ export const registerUpload = action({
     const fileId = await ctx.runMutation(
       internal.knowledgeBase.kb.insertFileInternal,
       {
-        userId: identity.subject,
+        userId,
         filename: args.filename,
         contentType,
         size: metadata.size,
@@ -214,11 +222,7 @@ export const retryProcessFile = action({
   returns: v.null(),
   handler: async (ctx, args) => {
     const label = "[knowledgeBase/kbActions: retryProcessFile]";
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      console.error(`${label} unauthorized`);
-      throw new ConvexError({ code: "AUTH_UNAUTHORIZED" });
-    }
+    const userId = await requireUserId(ctx, label);
 
     const file = await ctx.runQuery(internal.knowledgeBase.kb.getFileInternal, {
       fileId: args.fileId,
@@ -226,7 +230,7 @@ export const retryProcessFile = action({
     if (!file) {
       throw new ConvexError({ code: "FILE_NOT_FOUND" });
     }
-    if (file.userId !== identity.subject) {
+    if (file.userId !== userId) {
       throw new ConvexError({ code: "FORBIDDEN" });
     }
 
@@ -256,11 +260,7 @@ export const deleteFile = action({
   returns: v.null(),
   handler: async (ctx, args) => {
     const label = "[knowledgeBase/kbActions: deleteFile]";
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      console.error(`${label} unauthorized`);
-      throw new ConvexError({ code: "AUTH_UNAUTHORIZED" });
-    }
+    const userId = await requireUserId(ctx, label);
 
     const file = await ctx.runQuery(internal.knowledgeBase.kb.getFileInternal, {
       fileId: args.fileId,
@@ -268,7 +268,7 @@ export const deleteFile = action({
     if (!file) {
       throw new ConvexError({ code: "FILE_NOT_FOUND" });
     }
-    if (file.userId !== identity.subject) {
+    if (file.userId !== userId) {
       throw new ConvexError({ code: "FORBIDDEN" });
     }
 
@@ -281,5 +281,57 @@ export const deleteFile = action({
 
     console.info(`${label} deleted`);
     return null;
+  },
+});
+
+export const searchKnowledgeBase = action({
+  args: {
+    query: v.string(),
+    limit: v.optional(v.number()),
+  },
+  returns: v.array(
+    v.object({
+      fileId: v.id("knowledgeBaseFiles"),
+      filename: v.string(),
+      content: v.string(),
+    })
+  ),
+  handler: async (
+    ctx,
+    args
+  ): Promise<
+    Array<{
+      fileId: Id<"knowledgeBaseFiles">;
+      filename: string;
+      content: string;
+    }>
+  > => {
+    const label = "[knowledgeBase/kbActions: searchKnowledgeBase]";
+    const userId = await requireUserId(ctx, label);
+
+    const { embedding } = await embed({
+      model: "openai/text-embedding-3-small",
+      value: args.query,
+    });
+
+    const results = await ctx.vectorSearch(
+      "knowledgeBaseChunks",
+      "by_embedding",
+      {
+        vector: embedding,
+        limit: args.limit ?? 6,
+        filter: (q) => q.eq("userId", userId),
+      }
+    );
+    if (results.length === 0) {
+      return [];
+    }
+    return await ctx.runQuery(
+      internal.knowledgeBase.kb.searchKnowledgeBaseInternal,
+      {
+        userId,
+        chunkIds: results.map((result) => result._id),
+      }
+    );
   },
 });

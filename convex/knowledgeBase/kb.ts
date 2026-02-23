@@ -1,4 +1,5 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
+import type { Id } from "../_generated/dataModel";
 import { internalMutation, internalQuery, query } from "../_generated/server";
 
 export const listFiles = query({
@@ -33,41 +34,28 @@ export const listFiles = query({
       .withIndex("by_userId_and_createdAt", (q) => q.eq("userId", userId))
       .order("desc")
       .collect();
-    const results: Array<{
-      _id: (typeof files)[number]["_id"];
-      _creationTime: number;
-      filename: string;
-      contentType: string;
-      url: string;
-      size: number;
-      status: "processing" | "ready" | "failed";
-      errorMessage?: string;
-      chunkCount?: number;
-      createdAt: number;
-      updatedAt: number;
-    }> = [];
-
-    for (const file of files) {
-      const url = await ctx.storage.getUrl(file.storageId);
-      if (!url) {
-        throw new ConvexError({ code: "FILE_NOT_FOUND" });
-      }
-      results.push({
-        _id: file._id,
-        _creationTime: file._creationTime,
-        filename: file.filename,
-        contentType: file.contentType,
-        url,
-        size: file.size,
-        status: file.status,
-        errorMessage: file.errorMessage,
-        chunkCount: file.chunkCount,
-        createdAt: file.createdAt,
-        updatedAt: file.updatedAt,
-      });
-    }
-
-    return results;
+    const results = await Promise.all(
+      files.map(async (file) => {
+        const url = await ctx.storage.getUrl(file.storageId);
+        if (!url) {
+          return null;
+        }
+        return {
+          _id: file._id,
+          _creationTime: file._creationTime,
+          filename: file.filename,
+          contentType: file.contentType,
+          url,
+          size: file.size,
+          status: file.status,
+          errorMessage: file.errorMessage,
+          chunkCount: file.chunkCount,
+          createdAt: file.createdAt,
+          updatedAt: file.updatedAt,
+        };
+      })
+    );
+    return results.filter((file) => file !== null);
   },
 });
 
@@ -175,5 +163,52 @@ export const insertChunksInternal = internalMutation({
       await ctx.db.insert("knowledgeBaseChunks", chunk);
     }
     return null;
+  },
+});
+
+export const searchKnowledgeBaseInternal = internalQuery({
+  args: {
+    userId: v.string(),
+    chunkIds: v.array(v.id("knowledgeBaseChunks")),
+  },
+  returns: v.array(
+    v.object({
+      fileId: v.id("knowledgeBaseFiles"),
+      filename: v.string(),
+      content: v.string(),
+    })
+  ),
+  handler: async (ctx, args) => {
+    const fileNames = new Map<Id<"knowledgeBaseFiles">, string>();
+    const matches: Array<{
+      fileId: Id<"knowledgeBaseFiles">;
+      filename: string;
+      content: string;
+    }> = [];
+
+    for (const chunkId of args.chunkIds) {
+      const chunk = await ctx.db.get(chunkId);
+      if (!chunk || chunk.userId !== args.userId) {
+        continue;
+      }
+      if (!fileNames.has(chunk.fileId)) {
+        const file = await ctx.db.get(chunk.fileId);
+        if (!file || file.userId !== args.userId) {
+          continue;
+        }
+        fileNames.set(chunk.fileId, file.filename);
+      }
+      const filename = fileNames.get(chunk.fileId);
+      if (!filename) {
+        continue;
+      }
+      matches.push({
+        fileId: chunk.fileId,
+        filename,
+        content: chunk.content,
+      });
+    }
+
+    return matches;
   },
 });

@@ -2,7 +2,6 @@
 
 import { useAction, useQuery } from "convex/react";
 import { BookOpen, Loader, RotateCw, Upload } from "lucide-react";
-import { useCallback } from "react";
 import {
   FileUpload,
   FileUploadContent,
@@ -25,7 +24,9 @@ import type { Id } from "@/convex/_generated/dataModel";
 import { handleError } from "@/lib/handle-error";
 import { ConfirmDeleteDialog } from "./confirm-delete-dialog";
 
-const getStatusBadgeVariant = (status: string) => {
+type FileStatus = "processing" | "ready" | "failed";
+
+const getStatusBadgeVariant = (status: FileStatus) => {
   if (status === "failed") {
     return "destructive";
   }
@@ -35,7 +36,7 @@ const getStatusBadgeVariant = (status: string) => {
   return "default";
 };
 
-const getStatusLabel = (status: string) => {
+const getStatusLabel = (status: FileStatus) => {
   if (status === "failed") {
     return "Failed";
   }
@@ -43,13 +44,6 @@ const getStatusLabel = (status: string) => {
     return "Processing";
   }
   return "Ready";
-};
-
-const getDisplayErrorMessage = (errorMessage?: string) => {
-  if (!errorMessage) {
-    return null;
-  }
-  return "Processing failed. Please try again.";
 };
 
 export function KnowledgeBaseDialog() {
@@ -64,37 +58,34 @@ export function KnowledgeBaseDialog() {
   const isLoading = files === undefined;
   const isEmpty = !isLoading && fileList.length === 0;
 
-  const addFiles = useCallback(
-    (filesToAdd: File[]) => {
-      const uploadFile = async (file: File) => {
-        try {
-          const uploadUrl = await generateUploadUrl();
-          const response = await fetch(uploadUrl, {
-            method: "POST",
-            headers: {
-              "Content-Type": file.type || "application/octet-stream",
-            },
-            body: file,
-          });
-          if (!response.ok) {
-            throw new Error("Upload failed");
-          }
-          const json: { storageId: Id<"_storage"> } = await response.json();
-          await registerUpload({
-            storageId: json.storageId,
-            filename: file.name,
-          });
-        } catch (error) {
-          handleError(error);
-        }
-      };
-
-      for (const file of filesToAdd) {
-        uploadFile(file).catch(() => undefined);
+  const uploadFile = async (file: File) => {
+    try {
+      const uploadUrl = await generateUploadUrl();
+      const response = await fetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": file.type || "application/octet-stream",
+        },
+        body: file,
+      });
+      if (!response.ok) {
+        throw new Error("Upload failed");
       }
-    },
-    [generateUploadUrl, registerUpload]
-  );
+      const json: { storageId: Id<"_storage"> } = await response.json();
+      await registerUpload({
+        storageId: json.storageId,
+        filename: file.name,
+      });
+    } catch (error) {
+      handleError(error);
+    }
+  };
+
+  const addFiles = (filesToAdd: File[]) => {
+    for (const file of filesToAdd) {
+      uploadFile(file).catch(() => undefined);
+    }
+  };
   const shouldShowList = !(isLoading || isEmpty);
 
   const handleRetry = (fileId: Id<"knowledgeBaseFiles">) => {
@@ -154,9 +145,6 @@ export function KnowledgeBaseDialog() {
             {shouldShowList && (
               <div className="space-y-2">
                 {fileList.map((file) => {
-                  const displayError = getDisplayErrorMessage(
-                    file.errorMessage
-                  );
                   return (
                     <div
                       className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
@@ -171,9 +159,9 @@ export function KnowledgeBaseDialog() {
                         >
                           {file.filename}
                         </a>
-                        {displayError && (
+                        {file.errorMessage && (
                           <div className="text-destructive text-xs">
-                            {displayError}
+                            Processing failed. Please try again.
                           </div>
                         )}
                       </div>
