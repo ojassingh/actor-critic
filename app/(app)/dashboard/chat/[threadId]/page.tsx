@@ -23,7 +23,6 @@ export default function Page() {
         onThreadSelect={(selectedThreadId) =>
           router.push(`/dashboard/chat/${selectedThreadId}`)
         }
-        suggestions="generic"
         threadId={chatThreadId}
       />
     </main>
