@@ -7,7 +7,6 @@ import { action } from "../_generated/server";
 import { extractTextFromPdfBase64 } from "../ocr";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
-const MAX_PDF_PAGES = 5;
 const EXPIRES_MS = 24 * 60 * 60 * 1000;
 
 const isAllowedContentType = (contentType: string): boolean =>
@@ -35,21 +34,19 @@ export const registerUpload = action({
     }
 
     const metadata: { contentType?: string; size: number } = await ctx.runQuery(
-      internal.chat.files.getStorageMetadata,
-      {
-        storageId: args.storageId,
-      }
+      internal.storage.getStorageMetadata,
+      { storageId: args.storageId }
     );
     const contentType: string = metadata.contentType ?? "";
     if (!isAllowedContentType(contentType)) {
-      await ctx.runMutation(internal.chat.files.deleteStorageFile, {
+      await ctx.runMutation(internal.storage.deleteStorageFile, {
         storageId: args.storageId,
       });
       console.error(`${label} unsupported content type`);
       throw new ConvexError({ code: "UNSUPPORTED_CONTENT_TYPE" });
     }
     if (metadata.size > MAX_FILE_BYTES) {
-      await ctx.runMutation(internal.chat.files.deleteStorageFile, {
+      await ctx.runMutation(internal.storage.deleteStorageFile, {
         storageId: args.storageId,
       });
       console.error(`${label} file too large`);
@@ -68,9 +65,9 @@ export const registerUpload = action({
       try {
         const arrayBuffer = await blob.arrayBuffer();
         const base64 = Buffer.from(arrayBuffer).toString("base64");
-        markdown = await extractTextFromPdfBase64(base64, MAX_PDF_PAGES);
+        markdown = await extractTextFromPdfBase64(base64);
       } catch (error) {
-        await ctx.runMutation(internal.chat.files.deleteStorageFile, {
+        await ctx.runMutation(internal.storage.deleteStorageFile, {
           storageId: args.storageId,
         });
         console.error(`${label} PDF OCR failed`);
@@ -90,7 +87,7 @@ export const registerUpload = action({
         expiresAt: Date.now() + EXPIRES_MS,
       });
     } catch (error) {
-      await ctx.runMutation(internal.chat.files.deleteStorageFile, {
+      await ctx.runMutation(internal.storage.deleteStorageFile, {
         storageId: args.storageId,
       });
       console.error(`${label} failed to insert chat file`);

@@ -1,27 +1,6 @@
 import { ConvexError, v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
-import {
-  action,
-  internalMutation,
-  internalQuery,
-  query,
-} from "../_generated/server";
-
-export const generateUploadUrl = action({
-  args: {},
-  returns: v.string(),
-  handler: async (ctx) => {
-    const label = "[chat/files: generateUploadUrl]";
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      console.error(`${label} unauthorized`);
-      throw new ConvexError({ code: "AUTH_UNAUTHORIZED" });
-    }
-    const url = await ctx.storage.generateUploadUrl();
-    console.info(`${label} issued upload url`);
-    return url;
-  },
-});
+import { internalMutation, query } from "../_generated/server";
 
 export const getFilesForChat = query({
   args: { chatFileIds: v.array(v.id("chatFiles")) },
@@ -66,35 +45,6 @@ export const getFilesForChat = query({
       });
     }
     return results;
-  },
-});
-
-export const getStorageMetadata = internalQuery({
-  args: {
-    storageId: v.id("_storage"),
-  },
-  returns: v.object({
-    contentType: v.optional(v.string()),
-    size: v.number(),
-  }),
-  handler: async (ctx, args) => {
-    const metadata = await ctx.db.system.get("_storage", args.storageId);
-    if (!metadata) {
-      throw new ConvexError({ code: "FILE_NOT_FOUND" });
-    }
-    return {
-      contentType: metadata.contentType,
-      size: metadata.size,
-    };
-  },
-});
-
-export const deleteStorageFile = internalMutation({
-  args: { storageId: v.id("_storage") },
-  returns: v.null(),
-  handler: async (ctx, args) => {
-    await ctx.storage.delete(args.storageId);
-    return null;
   },
 });
 
